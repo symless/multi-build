@@ -24,6 +24,10 @@
   "extensionDependencies": [
     "vscode.git"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/symless/multi-host-build"
+  },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
