@@ -1,8 +1,9 @@
 {
-  "name": "multi-host-build",
-  "displayName": "multi-host-build",
-  "description": "Switch all machines to the same Git branch and build",
-  "version": "0.0.1",
+  "name": "multi-build",
+  "displayName": "Multi-Build",
+  "publisher": "symless",
+  "description": "Switch all machines to the same Git branch and then builds",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -16,17 +17,51 @@
   "contributes": {
     "commands": [
       {
-        "command": "multiHostCmake.startWatcher",
-        "title": "Start Multi-Host Watcher"
+        "command": "multiBuild.start",
+        "title": "Start Multi-Build"
+      },
+      {
+        "command": "multiBuild.stop",
+        "title": "Stop Multi-Build"
+      },
+      {
+        "command": "multiBuild.push",
+        "title": "Multi-Build Push"
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Multi-Build Configuration",
+      "properties": {
+        "multiBuild": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "default": "",
+              "description": "The Git repository to use for the multi-build."
+            },
+            "remote": {
+              "type": "string",
+              "default": "origin",
+              "description": "The Git remote to use for the multi-build."
+            },
+            "branch": {
+              "type": "string",
+              "default": "master",
+              "description": "The Git branch to use for the multi-build."
+            }
+          }
+        }
+      }
+    }
   },
   "extensionDependencies": [
     "vscode.git"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/symless/multi-host-build"
+    "url": "https://github.com/symless/multi-build"
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
