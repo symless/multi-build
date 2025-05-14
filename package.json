@@ -18,38 +18,54 @@
     "commands": [
       {
         "command": "multiBuild.start",
-        "title": "Start Multi-Build"
+        "title": "Multi-Build: Start"
       },
       {
         "command": "multiBuild.stop",
-        "title": "Stop Multi-Build"
+        "title": "Multi-Build: Stop"
       },
       {
-        "command": "multiBuild.push",
-        "title": "Multi-Build Push"
+        "command": "multiBuild.reload",
+        "title": "Multi-Build: Reload"
+      },
+      {
+        "command": "multiBuild.sync",
+        "title": "Multi-Build: Sync"
       }
     ],
     "configuration": {
       "type": "object",
       "title": "Multi-Build Configuration",
       "properties": {
-        "multiBuild": {
+        "multiBuild.server": {
           "type": "object",
+          "description": "Server configuration for syncing.",
+          "properties": {
+            "baseUrl": {
+              "type": "string",
+              "description": "The base URL of the server to use for syncing."
+            },
+            "roomId": {
+              "type": "string",
+              "description": "The room to use on the server for syncing, unique to you."
+            }
+          }
+        },
+        "multiBuild.syncData": {
+          "type": "object",
+          "description": "Data to sync between computers with the same room ID.",
           "properties": {
             "repo": {
               "type": "string",
-              "default": "",
-              "description": "The Git repository to use for the multi-build."
+              "description": "The Git repository to use."
             },
             "remote": {
               "type": "string",
-              "default": "origin",
-              "description": "The Git remote to use for the multi-build."
+              "description": "The Git remote to use."
             },
             "branch": {
               "type": "string",
-              "default": "master",
-              "description": "The Git branch to use for the multi-build."
+              "description": "The Git branch to use."
             }
           }
         }
@@ -73,14 +89,18 @@
     "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.99.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
+    "@types/vscode": "^1.99.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
-    "eslint": "^9.25.1",
-    "typescript": "^5.8.3",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "ws": "^8.18.2"
   }
 }
