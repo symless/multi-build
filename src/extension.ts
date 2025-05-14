@@ -201,7 +201,12 @@ async function processConfig() {
   console.log(`${logTag} Processing config:`, config);
   const { repo, remote, branch } = config;
 
-  await checkoutBranch(repo, remote, branch);
+  const checkoutResult = await checkoutBranch(repo, remote, branch);
+  if (!checkoutResult) {
+    console.log(`${logTag} Checkout failed, skipping build`);
+    return;
+  }
+
   vscode.window.showInformationMessage(`${extensionName}: Checked out: ${branch}`);
 
   console.log(`${logTag} CMake configure`);
@@ -215,21 +220,25 @@ async function processConfig() {
   await vscode.commands.executeCommand("cmake.build");
 }
 
-async function checkoutBranch(repoName: string, remoteName: string, branchName: string) {
+async function checkoutBranch(
+  repoName: string,
+  remoteName: string,
+  branchName: string,
+): Promise<boolean> {
   console.log(`${logTag} Checking out branch ${branchName} in repository ${repoName}`);
 
   const gitExtension = vscode.extensions.getExtension<GitExtension>("vscode.git")?.exports;
   const git: GitAPI | undefined = gitExtension?.getAPI(1);
 
   if (!git || git.repositories.length === 0) {
-    vscode.window.showErrorMessage(`${extensionName}: No Git repository found.`);
-    return;
+    console.log(`${logTag} No Git extension found or no repositories found`);
+    return false;
   }
 
   const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
   if (!repo) {
-    vscode.window.showErrorMessage(`${extensionName}: Repository ${repoName} not found.`);
-    return;
+    console.log(`${logTag} Repository ${repoName} not found`);
+    return false;
   }
 
   console.log(`${logTag} Found repository: ${repo.rootUri.fsPath}`);
@@ -241,13 +250,13 @@ async function checkoutBranch(repoName: string, remoteName: string, branchName: 
     console.log(`${logTag} Branch ${branchName} already exists`);
     await repo.checkout(branchName);
     await repo.pull();
-    return;
+  } else {
+    console.log(`${logTag} Branch ${branchName} does not exist, creating new branch`);
+    await repo.checkout(ref);
+    await repo.createBranch(branchName, true, ref);
+    await repo.setBranchUpstream(branchName, ref);
   }
 
-  console.log(`${logTag} Branch ${branchName} does not exist, creating new branch`);
-  await repo.checkout(ref);
-  await repo.createBranch(branchName, true, ref);
-  await repo.setBranchUpstream(branchName, ref);
-
   console.log(`${logTag} Checked out branch ${branchName} in repository ${repoName}`);
+  return true;
 }
