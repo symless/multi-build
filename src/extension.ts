@@ -129,52 +129,100 @@ function stopConfigWatcher() {
   console.debug(`${logTag} Stopped config watcher`);
 }
 
-async function getRepo() {
-  return await vscode.window.showInputBox({
-    prompt: "Enter the repository name",
-    placeHolder: "hello-repo",
-  });
+function getGitAPI() {
+  const gitExtension = vscode.extensions.getExtension<GitExtension>("vscode.git")?.exports;
+  if (!gitExtension) {
+    throw new Error(`No Git extension found`);
+  }
+  const git: GitAPI | undefined = gitExtension.getAPI(1);
+  if (!git) {
+    throw new Error(`No Git API found`);
+  }
+  return git;
 }
 
-async function getRemote() {
-  return await vscode.window.showInputBox({
-    prompt: "Enter the remote name",
-    placeHolder: "hello-remote",
-  });
+// Always show the list of remotes but pre-select the one that was used last.
+// We could save the last used repo in the workspace config, but for now we'll ask.
+async function getRepo(currentRepo?: string) {
+  const git = getGitAPI();
+  const repos = git.repositories.map((repo) => ({
+    label: path.basename(repo.rootUri.fsPath),
+    description: repo.rootUri.fsPath,
+    picked: currentRepo === path.basename(repo.rootUri.fsPath),
+  }));
+
+  const options = {
+    placeHolder: "Select a repository",
+    canPickMany: false,
+  };
+
+  return await vscode.window.showQuickPick(repos, options).then((item) => item?.label);
+}
+
+// If a remote was selected before, that will be used, otherwise show all remotes.
+// Don't show all remotes every time, as this makes it a bit tedious;
+// usually we don't want to switch remotes often.
+async function getRemote(repoName: string, currentRemote?: string) {
+  if (currentRemote) {
+    console.log(`${logTag} Using existing remote: ${currentRemote}`);
+    return currentRemote;
+  }
+
+  const git = getGitAPI();
+  const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
+  if (!repo) {
+    throw new Error(`Repository '${repoName}' not found`);
+  }
+
+  const remotes = repo.state.remotes.map((remote) => ({
+    label: remote.name,
+    description: remote.fetchUrl,
+    picked: currentRemote === remote.name,
+  }));
+  if (remotes.length === 0) {
+    vscode.window.showErrorMessage(
+      `${extensionName}: No remotes found for repository '${repoName}'`,
+    );
+    return null;
+  }
+  const options = {
+    placeHolder: "Select a remote",
+    canPickMany: false,
+  };
+
+  return await vscode.window.showQuickPick(remotes, options).then((item) => item?.label);
 }
 
 async function pushRepoSettings() {
   const config = getSyncData();
 
-  const repo = config.repo ?? (await getRepo());
+  const repo = await getRepo(config.repo);
   if (!repo) {
-    vscode.window.showErrorMessage(`${extensionName}: No repo provided`);
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no repo specified`);
     return;
   }
 
-  const remote = config.remote ?? (await getRemote());
+  const remote = await getRemote(repo, config.remote);
   if (!remote) {
-    vscode.window.showErrorMessage(`${extensionName}: No remote provided`);
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no remote specified`);
     return;
   }
 
+  // Always ask the branch name, as this is what changes most often.
+  // Copy pasting this from the PR isn't a big deal, and it's not often one we've used before.
   const branch = await vscode.window.showInputBox({
     prompt: "Enter the branch name",
     placeHolder: "hello-branch",
     value: config?.branch || "master",
   });
   if (!branch) {
-    vscode.window.showErrorMessage(`${extensionName}: No branch provided`);
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no branch specified`);
     return;
   }
 
   const data = { repo, remote, branch };
   console.log(`${logTag} Saving changes to config:`, data);
   await vscode.workspace.getConfiguration().update(syncDataConfigKey, data, true);
-
-  if (!roomSocket) {
-    throw new Error("No WebSocket connection found");
-  }
 
   console.log(`${logTag} Pushing changes to server`);
   sendMessage({ type: "sync", data });
@@ -336,11 +384,9 @@ async function checkoutBranch(
 ): Promise<boolean> {
   console.log(`${logTag} Checking out branch '${branchName}' in repository '${repoName}'`);
 
-  const gitExtension = vscode.extensions.getExtension<GitExtension>("vscode.git")?.exports;
-  const git: GitAPI | undefined = gitExtension?.getAPI(1);
-
-  if (!git || git.repositories.length === 0) {
-    console.log(`${logTag} No Git extension found or no repositories found`);
+  const git = getGitAPI();
+  if (git.repositories.length === 0) {
+    console.log(`${logTag} No Git repositories found`);
     return false;
   }
 
