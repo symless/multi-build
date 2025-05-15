@@ -9,56 +9,20 @@ const extensionName = "Multi-Build";
 const logTag = "[multi-build]";
 const serverConfigKey = "multiBuild.server";
 const syncDataConfigKey = "multiBuild.syncData";
-const startCommand = `multiBuild.start`;
-const stopCommand = `multiBuild.stop`;
-const reloadCommand = `multiBuild.reload`;
+const reconnectCommand = `multiBuild.reconnect`;
 const syncCommand = `multiBuild.sync`;
 const defaultBaseUrl = "wss://multi-build-server.symless.workers.dev";
-const keepAliveInterval = 10000; // 10 seconds
+const keepAliveIntervalMillis = 10000; // 10 seconds
 
 var configWatcher: vscode.Disposable | undefined;
-var workspaceWatcher: vscode.Disposable | undefined;
 var roomSocket: WebSocket | undefined;
 var keepAlive: NodeJS.Timeout | undefined;
+var connected = false;
 
 export function activate(context: vscode.ExtensionContext) {
   init().catch((error) => {
     handleError(error);
   });
-
-  console.log(`${logTag} Registering command: ${startCommand}`);
-  context.subscriptions.push(
-    vscode.commands.registerCommand(startCommand, () => {
-      try {
-        startWatchers();
-      } catch (error) {
-        handleError(error);
-      }
-    }),
-  );
-
-  console.log(`${logTag} Registering command: ${stopCommand}`);
-  context.subscriptions.push(
-    vscode.commands.registerCommand(stopCommand, () => {
-      try {
-        stopWatchers();
-      } catch (error) {
-        handleError(error);
-      }
-    }),
-  );
-
-  console.log(`${logTag} Registering command: ${reloadCommand}`);
-  context.subscriptions.push(
-    vscode.commands.registerCommand(reloadCommand, () => {
-      try {
-        unload();
-        load();
-      } catch (error) {
-        handleError(error);
-      }
-    }),
-  );
 
   console.log(`${logTag} Registering command: ${syncCommand}`);
   context.subscriptions.push(
@@ -70,18 +34,35 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
   );
+
+  console.log(`${logTag} Registering command: ${reconnectCommand}`);
+  context.subscriptions.push(
+    vscode.commands.registerCommand(reconnectCommand, async () => {
+      try {
+        await connectWebSocket();
+      } catch (error) {
+        handleError(error);
+      }
+    }),
+  );
 }
 
 export function deactivate() {
   try {
-    unload();
+    stopConfigWatcher();
+  } catch (error) {
+    handleError(error);
+  }
+
+  try {
+    disconnectWebSocket();
   } catch (error) {
     handleError(error);
   }
 }
 
 async function init() {
-  console.log(`${logTag} Initializing extension`);
+  console.log(`${logTag} Initializing`);
 
   const existingServerConfig = await getServerConfig();
   if (!existingServerConfig) {
@@ -107,19 +88,21 @@ async function init() {
     await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId }, true);
   }
 
-  console.log(`${logTag} Loading for first time`);
-  load();
+  console.log(`${logTag} Watching for config changes`);
+  configWatcher = vscode.workspace.onDidChangeConfiguration(async (event) => {
+    if (event.affectsConfiguration(serverConfigKey)) {
+      console.log(`${logTag} Config changed for key: ${serverConfigKey}`);
+      try {
+        await connectWebSocket();
+      } catch (error) {
+        handleError(error);
+      }
+    }
+  });
 
-  console.log(`${logTag} Extension initialized`);
-}
+  await connectWebSocket();
 
-function unload() {
-  stopWatchers();
-}
-
-function load() {
-  startWatchers();
-  connectWebSocket();
+  console.log(`${logTag} Initialized`);
 }
 
 function handleError(error: unknown) {
@@ -132,108 +115,116 @@ function handleError(error: unknown) {
   }
 }
 
-function startWatchers() {
-  console.log(`${logTag} Starting watchers`);
+function stopConfigWatcher() {
+  console.debug(`${logTag} Stopping config watcher`);
 
-  if (configWatcher) {
-    vscode.window.showErrorMessage(`${extensionName}: Already started`);
+  if (!configWatcher) {
+    console.warn(`${logTag} No config watcher to stop`);
     return;
   }
 
-  console.log(`${logTag} Watching for config changes`);
-  configWatcher = vscode.workspace.onDidChangeConfiguration(async (event) => {
-    if (event.affectsConfiguration(serverConfigKey)) {
-      console.log(`${logTag} Config changed for key: ${serverConfigKey}`);
-      try {
-        connectWebSocket();
-      } catch (error) {
-        handleError(error);
-      }
-    }
-  });
+  configWatcher.dispose();
+  configWatcher = undefined;
 
-  console.log(`${logTag} Watching for workspace changes`);
-  workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders((event) => {
-    console.log(`${logTag} Workspace changed`);
-    if (event.added.length > 0) {
-      console.log(`${logTag} Added workspace folder: ${event.added[0].name}`);
-      try {
-        connectWebSocket();
-      } catch (error) {
-        handleError(error);
-      }
-    }
-  });
+  console.debug(`${logTag} Stopped config watcher`);
 }
 
-function stopWatchers() {
-  console.log(`${logTag} Stopping watchers`);
+function getGitAPI() {
+  const gitExtension = vscode.extensions.getExtension<GitExtension>("vscode.git")?.exports;
+  if (!gitExtension) {
+    throw new Error(`No Git extension found`);
+  }
+  const git: GitAPI | undefined = gitExtension.getAPI(1);
+  if (!git) {
+    throw new Error(`No Git API found`);
+  }
+  return git;
+}
 
-  if (configWatcher) {
-    console.log(`${logTag} Stopping config watcher`);
-    configWatcher.dispose();
-    configWatcher = undefined;
-  } else {
-    console.warn(`${logTag} No config watcher to stop`);
+// Always show the list of remotes but pre-select the one that was used last.
+// We could save the last used repo in the workspace config, but for now we'll ask.
+async function getRepo(currentRepo?: string) {
+  const git = getGitAPI();
+  const repos = git.repositories.map((repo) => ({
+    label: path.basename(repo.rootUri.fsPath),
+    description: repo.rootUri.fsPath,
+    picked: currentRepo === path.basename(repo.rootUri.fsPath),
+  }));
+
+  const options = {
+    placeHolder: "Select a repository",
+    canPickMany: false,
+  };
+
+  return await vscode.window.showQuickPick(repos, options).then((item) => item?.label);
+}
+
+// If a remote was selected before and it's for the same repo as before, that remote will be used,
+// otherwise show all remotes since it's either a new repo or the remote wasn't chosen before.
+// Don't show all remotes every time, as this makes it a bit tedious; usually we only want to set
+// the remote once and use it for all future syncs. This chan be changed in `settings.json`.
+async function getRemote(repoName: string, currentConfig?: { repo?: string; remote?: string }) {
+  const { repo: currentRepo, remote: currentRemote } = currentConfig || {};
+  if (currentRepo === repoName && currentRemote) {
+    console.log(`${logTag} Repo not changed, using existing remote: ${currentRemote}`);
+    return currentRemote;
   }
 
-  if (workspaceWatcher) {
-    console.log(`${logTag} Stopping workspace watcher`);
-    workspaceWatcher.dispose();
-    workspaceWatcher = undefined;
-  } else {
-    console.warn(`${logTag} No workspace watcher to stop`);
+  const git = getGitAPI();
+  const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
+  if (!repo) {
+    throw new Error(`Repository '${repoName}' not found`);
   }
 
-  console.log(`${logTag} Stopped watchers`);
-}
+  const remotes = repo.state.remotes.map((remote) => ({
+    label: remote.name,
+    description: remote.fetchUrl,
+    picked: currentRemote === remote.name,
+  }));
+  if (remotes.length === 0) {
+    vscode.window.showErrorMessage(
+      `${extensionName}: No remotes found for repository '${repoName}'`,
+    );
+    return null;
+  }
+  const options = {
+    placeHolder: "Select a remote",
+    canPickMany: false,
+  };
 
-async function getRepo() {
-  return await vscode.window.showInputBox({
-    prompt: "Enter the repository name",
-    placeHolder: "hello-repo",
-  });
-}
-
-async function getRemote() {
-  return await vscode.window.showInputBox({
-    prompt: "Enter the remote name",
-    placeHolder: "hello-remote",
-  });
+  return await vscode.window.showQuickPick(remotes, options).then((item) => item?.label);
 }
 
 async function pushRepoSettings() {
   const config = getSyncData();
 
-  const repo = config.repo ?? (await getRepo());
+  const repo = await getRepo(config.repo);
   if (!repo) {
-    vscode.window.showErrorMessage(`${extensionName}: No repo provided`);
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no repo specified`);
     return;
   }
 
-  const remote = config.remote ?? (await getRemote());
+  const remote = await getRemote(repo, config);
   if (!remote) {
-    vscode.window.showErrorMessage(`${extensionName}: No remote provided`);
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no remote specified`);
     return;
   }
 
+  // Always ask the branch name, as this is what changes most often.
+  // Copy pasting this from the PR isn't a big deal, and it's not often one we've used before.
   const branch = await vscode.window.showInputBox({
     prompt: "Enter the branch name",
     placeHolder: "hello-branch",
     value: config?.branch || "master",
   });
   if (!branch) {
-    vscode.window.showErrorMessage(`${extensionName}: No branch provided`);
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no branch specified`);
     return;
   }
 
   const data = { repo, remote, branch };
   console.log(`${logTag} Saving changes to config:`, data);
   await vscode.workspace.getConfiguration().update(syncDataConfigKey, data, true);
-
-  if (!roomSocket) {
-    throw new Error("No WebSocket connection found");
-  }
 
   console.log(`${logTag} Pushing changes to server`);
   sendMessage({ type: "sync", data });
@@ -270,11 +261,11 @@ function sendMessage({ type, data }: { type: string; data?: unknown }) {
   if (!roomSocket) {
     throw new Error("No WebSocket connection found");
   }
-  console.log(`${logTag} Sending message: ${type}`, { data });
+  console.debug(`${logTag} Sending message: ${type}`, { data });
   roomSocket.send(JSON.stringify({ type, data }));
 }
 
-async function handleSyncMessage(data: { repo: string; remote: string; branch: string }) {
+async function handleSyncData(data: { repo: string; remote: string; branch: string }) {
   const { repo, remote, branch } = data;
   if (!repo || !remote || !branch) {
     console.error(`${logTag} Invalid sync message:`, data);
@@ -286,11 +277,13 @@ async function handleSyncMessage(data: { repo: string; remote: string; branch: s
 
   const checkoutResult = await checkoutBranch(repo, remote, branch);
   if (!checkoutResult) {
-    console.log(`${logTag} Checkout failed, skipping build`);
+    console.warn(`${logTag} Checkout failed, skipping build`);
     return;
   }
 
-  vscode.window.showInformationMessage(`${extensionName}: Checked out: ${branch}`);
+  vscode.window.showInformationMessage(
+    `${extensionName}: Checked out branch '${branch}' from '${repo}/${remote}'`,
+  );
 
   console.log(`${logTag} CMake configure`);
   await vscode.commands.executeCommand("cmake.configure");
@@ -304,19 +297,11 @@ async function handleSyncMessage(data: { repo: string; remote: string; branch: s
 }
 
 async function connectWebSocket() {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders) {
-    console.log(`${logTag} No workspace folders found, skipping`);
-    return;
-  }
-
   const { baseUrl, roomId } = await getServerConfig();
 
   if (roomSocket) {
-    console.log(`${logTag} Closing existing WebSocket connection`);
-    clearInterval(keepAlive);
-    roomSocket.close();
-    roomSocket = undefined;
+    console.log(`${logTag} WebSocket already connected, disconnecting`);
+    disconnectWebSocket();
   }
 
   console.log(`${logTag} Connecting WebSocket, room: ${roomId}`);
@@ -325,18 +310,19 @@ async function connectWebSocket() {
       Authorization: `Bearer ${await getAuthToken()}`,
     },
   });
+  connected = true;
 
   roomSocket.on("open", () => {
     assert(roomSocket);
     console.log(`${logTag} WebSocket connection opened`);
     sendMessage({ type: "hello" });
-    keepAlive = setInterval(() => sendMessage({ type: "keep-alive" }), keepAliveInterval);
+    keepAlive = setInterval(() => sendMessage({ type: "keep-alive" }), keepAliveIntervalMillis);
   });
 
   roomSocket.on("message", async (data) => {
     try {
       assert(roomSocket);
-      console.log(`${logTag} WebSocket message received:`, data.toString());
+      console.debug(`${logTag} WebSocket message received:`, data.toString());
       const message = JSON.parse(data.toString());
       if (message.type === "hello") {
         console.log(`${logTag} Hello back message received`);
@@ -347,9 +333,9 @@ async function connectWebSocket() {
         vscode.window.showErrorMessage(`${extensionName}: ${message.message}`);
       } else if (message.type === "sync") {
         console.log(`${logTag} Sync message received:`, message.data);
-        await handleSyncMessage(message.data);
+        await handleSyncData(message.data);
       } else {
-        console.log(`${logTag} Unknown message type: ${message.type}`);
+        console.error(`${logTag} Unknown message type: ${message.type}`);
         vscode.window.showErrorMessage(`${extensionName}: Unknown message type: ${message.type}`);
       }
     } catch (error) {
@@ -363,13 +349,36 @@ async function connectWebSocket() {
   });
 
   roomSocket.on("close", () => {
-    console.log(`${logTag} WebSocket connection closed`);
-    const waitTime = 5000;
-    vscode.window.showErrorMessage(
-      `${extensionName}: Remote connection closed, reconnecting in ${waitTime / 1000} seconds`,
+    if (!connected) {
+      console.log(`${logTag} WebSocket closed (expected)`);
+      return;
+    }
+
+    const retryDelay = 1000;
+    console.warn(
+      `${logTag} WebSocket closed unexpectedly, reconnecting in ${retryDelay / 1000} seconds`,
     );
-    setTimeout(() => connectWebSocket(), waitTime);
+    setTimeout(async () => {
+      try {
+        await connectWebSocket();
+      } catch (error) {
+        handleError(error);
+      }
+    }, retryDelay);
   });
+}
+
+function disconnectWebSocket() {
+  if (!roomSocket) {
+    console.warn(`${logTag} No WebSocket connection to close`);
+    return;
+  }
+
+  console.log(`${logTag} Closing WebSocket connection`);
+  clearInterval(keepAlive);
+  connected = false;
+  roomSocket.close();
+  roomSocket = undefined;
 }
 
 async function checkoutBranch(
@@ -379,17 +388,15 @@ async function checkoutBranch(
 ): Promise<boolean> {
   console.log(`${logTag} Checking out branch '${branchName}' in repository '${repoName}'`);
 
-  const gitExtension = vscode.extensions.getExtension<GitExtension>("vscode.git")?.exports;
-  const git: GitAPI | undefined = gitExtension?.getAPI(1);
-
-  if (!git || git.repositories.length === 0) {
-    console.log(`${logTag} No Git extension found or no repositories found`);
+  const git = getGitAPI();
+  if (git.repositories.length === 0) {
+    console.log(`${logTag} No Git repositories found`);
     return false;
   }
 
   const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
   if (!repo) {
-    console.log(`${logTag} Repository '${repoName}' not found`);
+    console.debug(`${logTag} Repository '${repoName}' not found`);
     return false;
   }
 
@@ -406,11 +413,11 @@ async function checkoutBranch(
   }
 
   if (repo.getBranch(branchName) !== undefined) {
-    console.log(`${logTag} Branch '${branchName}' already exists`);
+    console.debug(`${logTag} Branch '${branchName}' already exists`);
     await repo.checkout(branchName);
     await repo.pull();
   } else {
-    console.log(`${logTag} Branch '${branchName}' does not exist, creating new branch`);
+    console.debug(`${logTag} Branch '${branchName}' does not exist, creating new branch`);
     await repo.checkout(ref);
     await repo.createBranch(branchName, true, ref);
     await repo.setBranchUpstream(branchName, ref);
