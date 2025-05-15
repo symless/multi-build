@@ -151,14 +151,14 @@ async function getRepo(currentRepo?: string) {
     isFirst: currentRepo === path.basename(repo.rootUri.fsPath),
   }));
 
-  // Put the current repo first in the list, so it's pre-selected.
-  // The `picked` property is only for when `canPickMany` is true.
-  repos.sort((a, b) => (a.isFirst ? -1 : b.isFirst ? 1 : 0));
-
   if (repos.length === 0) {
     vscode.window.showErrorMessage(`${extensionName}: No Git repositories found`);
     return null;
   }
+
+  // Put the current repo first in the list, so it's pre-selected.
+  // The `picked` property is only for when `canPickMany` is true.
+  repos.sort((a, b) => (a.isFirst ? -1 : b.isFirst ? 1 : 0));
 
   const options = {
     placeHolder: "Select a repository",
