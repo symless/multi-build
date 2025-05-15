@@ -148,8 +148,17 @@ async function getRepo(currentRepo?: string) {
   const repos = git.repositories.map((repo) => ({
     label: path.basename(repo.rootUri.fsPath),
     description: repo.rootUri.fsPath,
-    picked: currentRepo === path.basename(repo.rootUri.fsPath),
+    isFirst: currentRepo === path.basename(repo.rootUri.fsPath),
   }));
+
+  // Put the current repo first in the list, so it's pre-selected.
+  // The `picked` property is only for when `canPickMany` is true.
+  repos.sort((a, b) => (a.isFirst ? -1 : b.isFirst ? 1 : 0));
+
+  if (repos.length === 0) {
+    vscode.window.showErrorMessage(`${extensionName}: No Git repositories found`);
+    return null;
+  }
 
   const options = {
     placeHolder: "Select a repository",
@@ -179,14 +188,20 @@ async function getRemote(repoName: string, currentConfig?: { repo?: string; remo
   const remotes = repo.state.remotes.map((remote) => ({
     label: remote.name,
     description: remote.fetchUrl,
-    picked: currentRemote === remote.name,
+    isFirst: currentRemote === remote.name,
   }));
+
   if (remotes.length === 0) {
     vscode.window.showErrorMessage(
       `${extensionName}: No remotes found for repository '${repoName}'`,
     );
     return null;
   }
+
+  // Put the current remote first in the list, so it's pre-selected.
+  // The `picked` property is only for when `canPickMany` is true.
+  remotes.sort((a, b) => (a.isFirst ? -1 : b.isFirst ? 1 : 0));
+
   const options = {
     placeHolder: "Select a remote",
     canPickMany: false,
