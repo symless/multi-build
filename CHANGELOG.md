@@ -7,5 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2025-05-14
+
+- Pre-select current repository and remote in selection lists
+
+## [0.0.4] - 2025-05-14
+
+- Selection of different repos and remotes
+- Update README.md - Add instructions
+
+## [0.0.3] - 2025-05-14
+
+- Add WebSocket support for syncing
+- Only build when checkout OK
+
+## [0.0.2] - 2025-05-14
+
+- Save config to `settings.json` instead of `.json` file in root of project and rely on VS Code to sync the data.
+
+## [0.0.1] - 2025-05-05
+
 - Initial release
-- Save config to `settings.json` instead of json in root of project
+- First prototype, uses `.json` in the root of each project which needs to be sync'd manually with something like [Syncthing](https://syncthing.net/).
