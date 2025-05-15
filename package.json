@@ -17,20 +17,12 @@
   "contributes": {
     "commands": [
       {
-        "command": "multiBuild.start",
-        "title": "Multi-Build: Start"
-      },
-      {
-        "command": "multiBuild.stop",
-        "title": "Multi-Build: Stop"
-      },
-      {
-        "command": "multiBuild.reload",
-        "title": "Multi-Build: Reload"
-      },
-      {
         "command": "multiBuild.sync",
         "title": "Multi-Build: Sync"
+      },
+      {
+        "command": "multiBuild.reconnect",
+        "title": "Multi-Build: Reconnect"
       }
     ],
     "configuration": {
