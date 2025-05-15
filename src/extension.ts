@@ -159,12 +159,14 @@ async function getRepo(currentRepo?: string) {
   return await vscode.window.showQuickPick(repos, options).then((item) => item?.label);
 }
 
-// If a remote was selected before, that will be used, otherwise show all remotes.
-// Don't show all remotes every time, as this makes it a bit tedious;
-// usually we don't want to switch remotes often.
-async function getRemote(repoName: string, currentRemote?: string) {
-  if (currentRemote) {
-    console.log(`${logTag} Using existing remote: ${currentRemote}`);
+// If a remote was selected before and it's for the same repo as before, that remote will be used,
+// otherwise show all remotes since it's either a new repo or the remote wasn't chosen before.
+// Don't show all remotes every time, as this makes it a bit tedious; usually we only want to set
+// the remote once and use it for all future syncs. This chan be changed in `settings.json`.
+async function getRemote(repoName: string, currentConfig?: { repo?: string; remote?: string }) {
+  const { repo: currentRepo, remote: currentRemote } = currentConfig || {};
+  if (currentRepo === repoName && currentRemote) {
+    console.log(`${logTag} Repo not changed, using existing remote: ${currentRemote}`);
     return currentRemote;
   }
 
@@ -202,7 +204,7 @@ async function pushRepoSettings() {
     return;
   }
 
-  const remote = await getRemote(repo, config.remote);
+  const remote = await getRemote(repo, config);
   if (!remote) {
     vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no remote specified`);
     return;
