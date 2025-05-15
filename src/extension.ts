@@ -292,7 +292,8 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
 
   const checkoutResult = await checkoutBranch(repo, remote, branch);
   if (!checkoutResult) {
-    console.warn(`${logTag} Checkout failed, skipping build`);
+    // Not necessarily an error; maybe the repo doesn't exist in this workspace.
+    console.debug(`${logTag} No Git checkout happened, skipping build`);
     return;
   }
 
@@ -401,8 +402,6 @@ async function checkoutBranch(
   remoteName: string,
   branchName: string,
 ): Promise<boolean> {
-  console.log(`${logTag} Checking out branch '${branchName}' in repository '${repoName}'`);
-
   const git = getGitAPI();
   if (git.repositories.length === 0) {
     console.log(`${logTag} No Git repositories found`);
@@ -411,11 +410,11 @@ async function checkoutBranch(
 
   const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
   if (!repo) {
-    console.debug(`${logTag} Repository '${repoName}' not found`);
+    console.log(`${logTag} Skipping checkout, no repo with name '${repoName}'`);
     return false;
   }
 
-  console.log(`${logTag} Found repository: ${repo.rootUri.fsPath}`);
+  console.log(`${logTag} Checking out branch '${branchName}' in repository ${repoName}`);
 
   const ref = `${remoteName}/${branchName}`;
   try {
