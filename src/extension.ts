@@ -281,7 +281,9 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
     return;
   }
 
-  vscode.window.showInformationMessage(`${extensionName}: Checked out: ${branch}`);
+  vscode.window.showInformationMessage(
+    `${extensionName}: Checked out branch '${branch}' from '${repo}/${remote}'`,
+  );
 
   console.log(`${logTag} CMake configure`);
   await vscode.commands.executeCommand("cmake.configure");
