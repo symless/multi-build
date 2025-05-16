@@ -64,28 +64,15 @@ export function deactivate() {
 async function init() {
   console.log(`${logTag} Initializing`);
 
-  const existingServerConfig = await getServerConfig();
-  if (!existingServerConfig) {
-    vscode.window.showErrorMessage(`${extensionName}: No server config found`);
-    return;
-  }
+  const { baseUrl, roomId } = await getServerConfig();
+  console.log(`${logTag} Server config:`, { baseUrl });
 
-  const { baseUrl } = existingServerConfig;
-
-  if (!baseUrl) {
-    vscode.window.showErrorMessage(`${extensionName}: No server base URL found`);
-    return;
-  }
-
-  var roomId: string;
-  const { roomId: existingRoomId } = existingServerConfig;
-  if (existingRoomId) {
-    console.log(`${logTag} Using existing room ID: ${existingRoomId}`);
-    roomId = existingRoomId;
+  if (roomId) {
+    console.log(`${logTag} Using existing room ID: ${roomId}`);
   } else {
-    roomId = randomUUID();
-    console.log(`${logTag} Saving new room ID: ${existingRoomId}`);
-    await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId }, true);
+    const newRoomId = randomUUID();
+    console.log(`${logTag} Saving new room ID: ${roomId}`);
+    await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId: newRoomId }, true);
   }
 
   console.log(`${logTag} Watching for config changes`);
@@ -152,6 +139,7 @@ async function getRepo(currentRepo?: string) {
   }));
 
   if (repos.length === 0) {
+    // Not exception, as this can happen if the user runs sync command with no repos open.
     vscode.window.showErrorMessage(`${extensionName}: No Git repositories found`);
     return null;
   }
@@ -192,10 +180,7 @@ async function getRemote(repoName: string, currentConfig?: { repo?: string; remo
   }));
 
   if (remotes.length === 0) {
-    vscode.window.showErrorMessage(
-      `${extensionName}: No remotes found for repository '${repoName}'`,
-    );
-    return null;
+    throw new Error(`No remotes found for repository '${repoName}'`);
   }
 
   // Put the current remote first in the list, so it's pre-selected.
@@ -284,8 +269,7 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
   const { repo, remote, branch } = data;
   if (!repo || !remote || !branch) {
     console.error(`${logTag} Invalid sync message:`, data);
-    vscode.window.showErrorMessage(`${extensionName}: Invalid sync message`);
-    return;
+    throw new Error("Invalid sync message");
   }
 
   console.log(`${logTag} Syncing repo: ${repo}, remote: ${remote}, branch: ${branch}`);
@@ -328,15 +312,21 @@ async function connectWebSocket() {
   connected = true;
 
   roomSocket.on("open", () => {
-    assert(roomSocket);
+    assert(roomSocket, "WebSocket is not defined on open");
     console.log(`${logTag} WebSocket connection opened`);
     sendMessage({ type: "hello" });
     keepAlive = setInterval(() => sendMessage({ type: "keep-alive" }), keepAliveIntervalMillis);
   });
 
   roomSocket.on("message", async (data) => {
+    if (!roomSocket) {
+      // Not an exception, as this happens in a race condition when the socket is closed
+      // (e.g. when reconnecting) just as a new message is coming in.
+      console.error(`${logTag} WebSocket message received, but socket was closed`);
+      return;
+    }
+
     try {
-      assert(roomSocket);
       console.debug(`${logTag} WebSocket message received:`, data.toString());
       const message = JSON.parse(data.toString());
       if (message.type === "hello") {
@@ -345,13 +335,11 @@ async function connectWebSocket() {
         console.debug(`${logTag} Ack message received`);
       } else if (message.type === "error") {
         console.error(`${logTag} Error message received: ${message.message}`);
-        vscode.window.showErrorMessage(`${extensionName}: ${message.message}`);
       } else if (message.type === "sync") {
         console.log(`${logTag} Sync message received:`, message.data);
         await handleSyncData(message.data);
       } else {
-        console.error(`${logTag} Unknown message type: ${message.type}`);
-        vscode.window.showErrorMessage(`${extensionName}: Unknown message type: ${message.type}`);
+        throw new Error(`Unknown message type: ${message.type}`);
       }
     } catch (error) {
       handleError(error);
@@ -360,7 +348,6 @@ async function connectWebSocket() {
 
   roomSocket.on("error", (error) => {
     console.error(`${logTag} WebSocket error: ${error}`);
-    vscode.window.showErrorMessage(`${extensionName}: Connection error: ${error}`);
   });
 
   roomSocket.on("close", () => {
@@ -421,6 +408,7 @@ async function checkoutBranch(
   try {
     await repo.fetch(remoteName, branchName);
   } catch (error) {
+    // Not an exception, as expected when user enters bad branch name.
     vscode.window.showErrorMessage(
       `${extensionName}: Error fetching Git branch '${ref}': ${error}`,
     );
