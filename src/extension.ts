@@ -15,7 +15,7 @@ const defaultBaseUrl = "wss://multi-build-server.symless.workers.dev";
 const keepAliveIntervalMillis = 10000; // 10 seconds
 
 var configWatcher: vscode.Disposable | undefined;
-var roomSocket: WebSocket | undefined;
+var activeSocket: WebSocket | undefined;
 var keepAlive: NodeJS.Timeout | undefined;
 var connected = false;
 
@@ -258,11 +258,11 @@ async function getAuthToken() {
 }
 
 function sendMessage({ type, data }: { type: string; data?: unknown }) {
-  if (!roomSocket) {
+  if (!activeSocket) {
     throw new Error("No WebSocket connection found");
   }
   console.debug(`${logTag} Sending message: ${type}`, { data });
-  roomSocket.send(JSON.stringify({ type, data }));
+  activeSocket.send(JSON.stringify({ type, data }));
 }
 
 async function handleSyncData(data: { repo: string; remote: string; branch: string }) {
@@ -298,28 +298,32 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
 async function connectWebSocket() {
   const { baseUrl, roomId } = await getServerConfig();
 
-  if (roomSocket) {
+  if (activeSocket) {
     console.log(`${logTag} WebSocket already connected, disconnecting`);
     disconnectWebSocket();
   }
 
   console.log(`${logTag} Connecting WebSocket, room: ${roomId}`);
-  roomSocket = new WebSocket(`${baseUrl}/room/${roomId}`, {
+  const newSocket = new WebSocket(`${baseUrl}/room/${roomId}`, {
     headers: {
       Authorization: `Bearer ${await getAuthToken()}`,
     },
   });
+
+  // Replace the old socket with the new one; do not use `activeSocket` for the event handlers,
+  // as it may be a different socket if the connection was closed and re-opened.
+  activeSocket = newSocket;
   connected = true;
 
-  roomSocket.on("open", () => {
-    assert(roomSocket, "WebSocket is not defined on open");
+  newSocket.on("open", () => {
+    assert(newSocket, "WebSocket is not defined on open");
     console.log(`${logTag} WebSocket connection opened`);
     sendMessage({ type: "hello" });
     keepAlive = setInterval(() => sendMessage({ type: "keep-alive" }), keepAliveIntervalMillis);
   });
 
-  roomSocket.on("message", async (data) => {
-    if (!roomSocket) {
+  newSocket.on("message", async (data) => {
+    if (!newSocket) {
       // Not an exception, as this happens in a race condition when the socket is closed
       // (e.g. when reconnecting) just as a new message is coming in.
       console.error(`${logTag} WebSocket message received, but socket was closed`);
@@ -346,11 +350,11 @@ async function connectWebSocket() {
     }
   });
 
-  roomSocket.on("error", (error) => {
+  newSocket.on("error", (error) => {
     console.error(`${logTag} WebSocket error: ${error}`);
   });
 
-  roomSocket.on("close", () => {
+  newSocket.on("close", () => {
     if (!connected) {
       console.log(`${logTag} WebSocket closed (expected)`);
       return;
@@ -371,7 +375,7 @@ async function connectWebSocket() {
 }
 
 function disconnectWebSocket() {
-  if (!roomSocket) {
+  if (!activeSocket) {
     console.warn(`${logTag} No WebSocket connection to close`);
     return;
   }
@@ -379,8 +383,8 @@ function disconnectWebSocket() {
   console.log(`${logTag} Closing WebSocket connection`);
   clearInterval(keepAlive);
   connected = false;
-  roomSocket.close();
-  roomSocket = undefined;
+  activeSocket.close();
+  activeSocket = undefined;
 }
 
 async function checkoutBranch(
