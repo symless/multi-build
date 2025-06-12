@@ -7,6 +7,7 @@ import assert from "assert";
 
 const extensionName = "Multi-Build";
 const logTag = "[multi-build]";
+const cargoLogTag = "[cargo-e]";
 const serverConfigKey = "multiBuild.server";
 const syncDataConfigKey = "multiBuild.syncData";
 const reconnectCommand = `multiBuild.reconnect`;
@@ -21,6 +22,9 @@ var keepAlive: NodeJS.Timeout | undefined;
 var connected = false;
 
 export function activate(context: vscode.ExtensionContext) {
+  console.log(`${logTag} Activating ${extensionName} v${context.extension.packageJSON.version}`);
+  vscode.window.showInformationMessage(`${extensionName} v${context.extension.packageJSON.version} loaded successfully.`);
+
   init().catch((error) => {
     handleError(error);
   });
@@ -326,16 +330,160 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
   vscode.window.showInformationMessage(
     `${extensionName}: Checked out branch '${branch}' from '${repo}/${remote}'`,
   );
+  // Check if Cargo.toml exists in the repo root
+  const git = getGitAPI();
+  const repoObj = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repo);
+  if (repoObj) {
+    const cargoFiles = await vscode.workspace.findFiles("**/Cargo.toml");
+    console.debug(`${logTag} Found Cargo.toml files:`, cargoFiles.map(f => f.fsPath));
+    if (cargoFiles.length === 0) {
+      vscode.window.showErrorMessage(`${extensionName}: No Cargo.toml files found in the workspace.`);
+      return;
+    }
 
-  console.log(`${logTag} CMake configure`);
-  await vscode.commands.executeCommand("cmake.configure");
+    const selectedFile = await vscode.window.showQuickPick(
+      cargoFiles.map((file) => ({
+        label: path.basename(file.fsPath),
+        description: file.fsPath,
+        filePath: file.fsPath,
+      })),
+      {
+        placeHolder: "Select a Cargo.toml file",
+      },
+    );
 
-  // Wait a moment for CMake to finish up (or we get "already running" errors).
-  console.log(`${logTag} Waiting for CMake`);
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (!selectedFile) {
+      vscode.window.showErrorMessage(`${extensionName}: No file selected.`);
+      return;
+    }
+    const selectedTarget = await listCargoETargets(selectedFile.filePath).catch((error) => {
+      vscode.window.showErrorMessage(`${cargoLogTag} Error listing Cargo-e targets: ${error}`);
+      return null;
+    });
+    if (!selectedTarget) {
+      console.warn(`${cargoLogTag} No target selected, running default Cargo-e command`);
+    }
+    const selectedDir = path.dirname(selectedFile.filePath);
+    console.log(`${cargoLogTag} Found Cargo.toml, running 'cargo-e' in ${selectedDir}`);
+    const terminal = vscode.window.createTerminal({
+      name: "Cargo Build",
+      cwd: selectedDir,
+    });
+    terminal.show();
+    const targetName = selectedTarget ? selectedTarget.label : undefined;
+    const cargoCommand = targetName ? `cargo-e --manifest-path ${selectedFile.filePath} --target ${targetName}` : `cargo-e --manifest-path ${selectedFile.filePath}`;
+    terminal.sendText(cargoCommand);
 
-  console.log(`${logTag} CMake build`);
-  await vscode.commands.executeCommand("cmake.build");
+    // Send WebSocket message to synchronize with other systems
+    sendMessage({
+      type: "cargo-e",
+      data: {
+        manifestPath: selectedFile.filePath,
+        target: targetName,
+      },
+    });
+    return;
+  }
+
+  // Check if CMakeLists.txt exists in the repo root
+  const cmakeFiles = await vscode.workspace.findFiles("**/CMakeLists.txt");
+  if (cmakeFiles.length > 0) {
+    console.log(`${logTag} Found CMakeLists.txt files:`, cmakeFiles.map(f => f.fsPath));
+    console.log(`${logTag} CMake configure`);
+    await vscode.commands.executeCommand("cmake.configure");
+
+    // Wait a moment for CMake to finish up (or we get "already running" errors).
+    console.log(`${logTag} Waiting for CMake`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    console.log(`${logTag} CMake build`);
+    await vscode.commands.executeCommand("cmake.build");
+  } else {
+    vscode.window.showErrorMessage(`${extensionName}: No CMakeLists.txt files found in the workspace.`);
+  }
+}
+
+// Add logic to run `cargo-e --json-all-targets` and list targets
+async function listCargoETargets(manifestPath: string): Promise<{ label: string; description: string; detail: string } | null> {
+  try {
+    console.log(`${cargoLogTag} Listing Cargo-e targets for manifest: ${manifestPath}`);
+    const { exec } = await import("child_process");
+    const output = await new Promise<string>((resolve, reject) => {
+      exec(
+        `cargo-e --json-all-targets --manifest-path "${manifestPath}"`,
+        { cwd: path.dirname(manifestPath) },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(stderr || error.message);
+          } else {
+            resolve(stdout);
+          }
+        }
+      );
+    });
+
+    console.log(`${cargoLogTag} Raw output from cargo-e:`, output);
+
+    // Parse the JSON output
+    let targets: any[];
+    try {
+      targets = JSON.parse(output);
+      console.log(`${cargoLogTag} Parsed JSON targets:`, targets);
+      if (!Array.isArray(targets) || targets.length === 0) {
+        vscode.window.showWarningMessage(`${cargoLogTag} No targets found in output.`);
+        return null;
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`${cargoLogTag} Failed to parse JSON output: ${error}`);
+      return null;
+    }
+
+    // Extract target display names
+    const targetOptions: { label: string; description: string; detail: string }[] = targets.map((target: any) => ({
+      label: target.name || "unknown",
+      description: target.kind || "",
+      detail: target.manifest_path || "",
+    }));
+
+    console.log(`${cargoLogTag} Target options for Quick Pick:`, targetOptions);
+
+    // Show the targets in a Quick Pick menu
+    // Add lifecycle logs and a delay for debugging
+    console.log(`${cargoLogTag} Showing Quick Pick menu.`);
+    try {
+      // Use showQuickPick and keep the menu open until user selects or cancels.
+      // Prevent auto-closing by awaiting the promise and not triggering any other UI.
+      const selectedTarget = await vscode.window.showQuickPick(targetOptions, {
+        placeHolder: "Select a target to execute",
+        ignoreFocusOut: true, // Keeps the picker open if focus is lost
+      });
+
+      console.log(`${cargoLogTag} Quick Pick menu dismissed.`);
+
+      if (!selectedTarget) {
+        // Only show info if there were options but user cancelled
+        if (targetOptions.length > 0) {
+          vscode.window.showInformationMessage(`${cargoLogTag} No target selected.`);
+        }
+        console.log(`${cargoLogTag} Quick Pick cancelled by user.`);
+        return null;
+      }
+
+      console.log(`${cargoLogTag} User selected target:`, selectedTarget);
+      return selectedTarget;
+    } catch (error) {
+      console.error(`${cargoLogTag} Error during Quick Pick:`, error);
+      vscode.window.showErrorMessage(`${cargoLogTag} Error during target selection: ${error}`);
+      return null;
+    } finally {
+      // Add a delay to observe the Quick Pick menu behavior
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  } catch (error) {
+    vscode.window.showErrorMessage(`${cargoLogTag} Error listing targets: ${error}`);
+    console.error(`${cargoLogTag} Error details:`, error);
+    return null;
+  }
 }
 
 async function connectWebSocket() {
