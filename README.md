@@ -33,6 +33,7 @@ Happy coding.
 ## How to use
 
 **Prerequisites:**
+- To package you will need `npm install -g @vscode/vsce`
 - The extension should automatically create an entry in `settings.json`, `multiBuild.server.roomId`, and if you
   have your VS Code setup to sync your settings, this room ID will automatically be shared on all your computers.
   You may need to force-sync as VS Code can have a mind of its own.

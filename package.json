@@ -27,6 +27,14 @@
       {
         "command": "multiBuild.showRoomId",
         "title": "Multi-Build: Show/Edit Room ID"
+      },
+      {
+        "command": "multiBuild.updateAndInstall",
+        "title": "Multi-Build: Update, Package, and Install Extension"
+      },
+      {
+        "command": "multiBuild.broadcastUpdateAndInstall",
+        "title": "Multi-Build: Broadcast Update/Install to All Machines"
       }
     ],
     "configuration": {
