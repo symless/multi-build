@@ -323,14 +323,8 @@ async function connectWebSocket() {
   });
 
   newSocket.on("message", async (data) => {
-    if (!newSocket) {
-      // Not an exception, as this happens in a race condition when the socket is closed
-      // (e.g. when reconnecting) just as a new message is coming in.
-      console.error(`${logTag} WebSocket message received, but socket was closed`);
-      return;
-    }
-
     try {
+      assert(newSocket, "WebSocket is not defined on message");
       console.debug(`${logTag} WebSocket message received:`, data.toString());
       const message = JSON.parse(data.toString());
       if (message.type === "hello") {
