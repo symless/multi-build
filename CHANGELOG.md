@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2025-06-12
+
+- Add command to show/edit room ID
+
 ## [0.0.5] - 2025-05-14
 
 - Pre-select current repository and remote in selection lists

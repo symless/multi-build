@@ -11,6 +11,7 @@ const serverConfigKey = "multiBuild.server";
 const syncDataConfigKey = "multiBuild.syncData";
 const reconnectCommand = `multiBuild.reconnect`;
 const syncCommand = `multiBuild.sync`;
+const showRoomIdCommand = "multiBuild.showRoomId";
 const defaultBaseUrl = "wss://multi-build-server.symless.workers.dev";
 const keepAliveIntervalMillis = 10000; // 10 seconds
 
@@ -45,6 +46,19 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
   );
+
+  // Register command to show and edit the current room ID
+  context.subscriptions.push(
+    vscode.commands.registerCommand(showRoomIdCommand, async () => {
+      const config = await getServerConfig();
+      const roomId = await showRoomIdPrompt(config.roomId);
+      if (roomId !== config.roomId) {
+        await updateServerConfig({ ...config, roomId });
+      } else {
+        vscode.window.showInformationMessage(`${extensionName}: Room ID did not change`);
+      }
+    }),
+  );
 }
 
 export function deactivate() {
@@ -64,15 +78,14 @@ export function deactivate() {
 async function init() {
   console.log(`${logTag} Initializing`);
 
-  const { baseUrl, roomId } = await getServerConfig();
-  console.log(`${logTag} Server config:`, { baseUrl });
+  const config = await getServerConfig();
+  console.log(`${logTag} Server config:`, config);
 
-  if (roomId) {
-    console.log(`${logTag} Using existing room ID: ${roomId}`);
+  if (!config.roomId) {
+    const roomId = await showRoomIdPrompt(config.roomId);
+    await updateServerConfig({ ...config, roomId });
   } else {
-    const newRoomId = randomUUID();
-    console.log(`${logTag} Saving new room ID: ${roomId}`);
-    await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId: newRoomId }, true);
+    console.log(`${logTag} Using existing room ID: ${config.roomId}`);
   }
 
   console.log(`${logTag} Watching for config changes`);
@@ -90,6 +103,35 @@ async function init() {
   await connectWebSocket();
 
   console.log(`${logTag} Initialized`);
+}
+
+async function updateServerConfig(newConfig: { baseUrl?: string; roomId?: string }) {
+  await vscode.workspace.getConfiguration().update(serverConfigKey, newConfig, true);
+}
+
+async function showRoomIdPrompt(existing: string | null) {
+  // Prompt the user for a room ID.
+  // Hopefully they don't enter something that is already in use, as 'room in use' UX is a bit
+  // unintuitive/undefined right now (you'll most likely get an authentication error).
+  if (existing) {
+    console.log(`${logTag} Using existing room ID: ${existing}`);
+    return await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      value: existing,
+      prompt: `${extensionName}: The room ID must match on all computers.`,
+    });
+  } else {
+    console.log(`${logTag} No existing room ID, generating a new one`);
+    return await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      value: randomUUID(),
+      prompt:
+        `${extensionName}: ` +
+        "First timers can use this uniquely generated room ID, " +
+        "or copy-paste an existing ID from another computer. " +
+        "The room ID must match on all computers.",
+    });
+  }
 }
 
 function handleError(error: unknown) {
@@ -233,7 +275,7 @@ async function pushRepoSettings() {
 async function getServerConfig() {
   const config = vscode.workspace.getConfiguration(serverConfigKey);
   const baseUrl = config.get<string>("baseUrl") || defaultBaseUrl;
-  const roomId = config.get<string>("roomId");
+  const roomId = config.get<string>("roomId") || null;
   return { baseUrl, roomId };
 }
 
