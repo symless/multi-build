@@ -51,11 +51,11 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(showRoomIdCommand, async () => {
       const config = await getServerConfig();
-      const roomId = await getRoomId(config.roomId);
+      const roomId = await showRoomIdPrompt(config.roomId);
       if (roomId !== config.roomId) {
         await updateServerConfig({ ...config, roomId });
       } else {
-        vscode.window.showInformationMessage(`${extensionName}: Room ID unchanged: ${roomId}`);
+        vscode.window.showInformationMessage(`${extensionName}: Room ID did not change`);
       }
     }),
   );
@@ -82,7 +82,7 @@ async function init() {
   console.log(`${logTag} Server config:`, config);
 
   if (!config.roomId) {
-    const roomId = await getRoomId(config.roomId);
+    const roomId = await showRoomIdPrompt(config.roomId);
     await updateServerConfig({ ...config, roomId });
   } else {
     console.log(`${logTag} Using existing room ID: ${config.roomId}`);
@@ -109,27 +109,29 @@ async function updateServerConfig(newConfig: { baseUrl?: string; roomId?: string
   await vscode.workspace.getConfiguration().update(serverConfigKey, newConfig, true);
 }
 
-async function getRoomId(existingRoomId: string | null) {
+async function showRoomIdPrompt(existing: string | null) {
   // Prompt the user for a room ID.
   // Hopefully they don't enter something that is already in use, as 'room in use' UX is a bit
-  // unintuitive right now (you'll most likely get an authentication error).
-  const custom = await vscode.window.showInputBox({
-    prompt:
-      "The room ID must match on all computers. " +
-      "First timers leave this blank to generate a new unique room ID, " +
-      "or copy-paste an existing one from another computer.",
-    ignoreFocusOut: true,
-  });
-
-  if (custom) {
-    vscode.window.showInformationMessage(`${extensionName}: Using new room ID: ${custom}`);
-    return custom.trim();
+  // unintuitive/undefined right now (you'll most likely get an authentication error).
+  if (existing) {
+    console.log(`${logTag} Using existing room ID: ${existing}`);
+    return await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      value: existing,
+      prompt: `${extensionName}: The room ID must match on all computers.`,
+    });
+  } else {
+    console.log(`${logTag} No existing room ID, generating a new one`);
+    return await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      value: randomUUID(),
+      prompt:
+        `${extensionName}: ` +
+        "First timers can use this uniquely generated room ID, " +
+        "or copy-paste an existing ID from another computer. " +
+        "The room ID must match on all computers.",
+    });
   }
-
-  // If user leaves blank, generate a new one.
-  const generated = randomUUID();
-  vscode.window.showInformationMessage(`${extensionName}: Generated new room ID: ${generated}`);
-  return generated;
 }
 
 function handleError(error: unknown) {
