@@ -15,7 +15,7 @@ const defaultBaseUrl = "wss://multi-build-server.symless.workers.dev";
 const keepAliveIntervalMillis = 10000; // 10 seconds
 
 var configWatcher: vscode.Disposable | undefined;
-var roomSocket: WebSocket | undefined;
+var activeSocket: WebSocket | undefined;
 var keepAlive: NodeJS.Timeout | undefined;
 var connected = false;
 
@@ -64,28 +64,15 @@ export function deactivate() {
 async function init() {
   console.log(`${logTag} Initializing`);
 
-  const existingServerConfig = await getServerConfig();
-  if (!existingServerConfig) {
-    vscode.window.showErrorMessage(`${extensionName}: No server config found`);
-    return;
-  }
+  const { baseUrl, roomId } = await getServerConfig();
+  console.log(`${logTag} Server config:`, { baseUrl });
 
-  const { baseUrl } = existingServerConfig;
-
-  if (!baseUrl) {
-    vscode.window.showErrorMessage(`${extensionName}: No server base URL found`);
-    return;
-  }
-
-  var roomId: string;
-  const { roomId: existingRoomId } = existingServerConfig;
-  if (existingRoomId) {
-    console.log(`${logTag} Using existing room ID: ${existingRoomId}`);
-    roomId = existingRoomId;
+  if (roomId) {
+    console.log(`${logTag} Using existing room ID: ${roomId}`);
   } else {
-    roomId = randomUUID();
-    console.log(`${logTag} Saving new room ID: ${existingRoomId}`);
-    await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId }, true);
+    const newRoomId = randomUUID();
+    console.log(`${logTag} Saving new room ID: ${roomId}`);
+    await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId: newRoomId }, true);
   }
 
   console.log(`${logTag} Watching for config changes`);
@@ -152,6 +139,7 @@ async function getRepo(currentRepo?: string) {
   }));
 
   if (repos.length === 0) {
+    // Not exception, as this can happen if the user runs sync command with no repos open.
     vscode.window.showErrorMessage(`${extensionName}: No Git repositories found`);
     return null;
   }
@@ -192,10 +180,7 @@ async function getRemote(repoName: string, currentConfig?: { repo?: string; remo
   }));
 
   if (remotes.length === 0) {
-    vscode.window.showErrorMessage(
-      `${extensionName}: No remotes found for repository '${repoName}'`,
-    );
-    return null;
+    throw new Error(`No remotes found for repository '${repoName}'`);
   }
 
   // Put the current remote first in the list, so it's pre-selected.
@@ -273,19 +258,18 @@ async function getAuthToken() {
 }
 
 function sendMessage({ type, data }: { type: string; data?: unknown }) {
-  if (!roomSocket) {
+  if (!activeSocket) {
     throw new Error("No WebSocket connection found");
   }
   console.debug(`${logTag} Sending message: ${type}`, { data });
-  roomSocket.send(JSON.stringify({ type, data }));
+  activeSocket.send(JSON.stringify({ type, data }));
 }
 
 async function handleSyncData(data: { repo: string; remote: string; branch: string }) {
   const { repo, remote, branch } = data;
   if (!repo || !remote || !branch) {
     console.error(`${logTag} Invalid sync message:`, data);
-    vscode.window.showErrorMessage(`${extensionName}: Invalid sync message`);
-    return;
+    throw new Error("Invalid sync message");
   }
 
   console.log(`${logTag} Syncing repo: ${repo}, remote: ${remote}, branch: ${branch}`);
@@ -314,29 +298,39 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
 async function connectWebSocket() {
   const { baseUrl, roomId } = await getServerConfig();
 
-  if (roomSocket) {
+  if (activeSocket) {
     console.log(`${logTag} WebSocket already connected, disconnecting`);
     disconnectWebSocket();
   }
 
   console.log(`${logTag} Connecting WebSocket, room: ${roomId}`);
-  roomSocket = new WebSocket(`${baseUrl}/room/${roomId}`, {
+  const newSocket = new WebSocket(`${baseUrl}/room/${roomId}`, {
     headers: {
       Authorization: `Bearer ${await getAuthToken()}`,
     },
   });
+
+  // Replace the old socket with the new one; do not use `activeSocket` for the event handlers,
+  // as it may be a different socket if the connection was closed and re-opened.
+  activeSocket = newSocket;
   connected = true;
 
-  roomSocket.on("open", () => {
-    assert(roomSocket);
+  newSocket.on("open", () => {
+    assert(newSocket, "WebSocket is not defined on open");
     console.log(`${logTag} WebSocket connection opened`);
     sendMessage({ type: "hello" });
     keepAlive = setInterval(() => sendMessage({ type: "keep-alive" }), keepAliveIntervalMillis);
   });
 
-  roomSocket.on("message", async (data) => {
+  newSocket.on("message", async (data) => {
+    if (!newSocket) {
+      // Not an exception, as this happens in a race condition when the socket is closed
+      // (e.g. when reconnecting) just as a new message is coming in.
+      console.error(`${logTag} WebSocket message received, but socket was closed`);
+      return;
+    }
+
     try {
-      assert(roomSocket);
       console.debug(`${logTag} WebSocket message received:`, data.toString());
       const message = JSON.parse(data.toString());
       if (message.type === "hello") {
@@ -345,25 +339,22 @@ async function connectWebSocket() {
         console.debug(`${logTag} Ack message received`);
       } else if (message.type === "error") {
         console.error(`${logTag} Error message received: ${message.message}`);
-        vscode.window.showErrorMessage(`${extensionName}: ${message.message}`);
       } else if (message.type === "sync") {
         console.log(`${logTag} Sync message received:`, message.data);
         await handleSyncData(message.data);
       } else {
-        console.error(`${logTag} Unknown message type: ${message.type}`);
-        vscode.window.showErrorMessage(`${extensionName}: Unknown message type: ${message.type}`);
+        throw new Error(`Unknown message type: ${message.type}`);
       }
     } catch (error) {
       handleError(error);
     }
   });
 
-  roomSocket.on("error", (error) => {
+  newSocket.on("error", (error) => {
     console.error(`${logTag} WebSocket error: ${error}`);
-    vscode.window.showErrorMessage(`${extensionName}: Connection error: ${error}`);
   });
 
-  roomSocket.on("close", () => {
+  newSocket.on("close", () => {
     if (!connected) {
       console.log(`${logTag} WebSocket closed (expected)`);
       return;
@@ -384,7 +375,7 @@ async function connectWebSocket() {
 }
 
 function disconnectWebSocket() {
-  if (!roomSocket) {
+  if (!activeSocket) {
     console.warn(`${logTag} No WebSocket connection to close`);
     return;
   }
@@ -392,8 +383,8 @@ function disconnectWebSocket() {
   console.log(`${logTag} Closing WebSocket connection`);
   clearInterval(keepAlive);
   connected = false;
-  roomSocket.close();
-  roomSocket = undefined;
+  activeSocket.close();
+  activeSocket = undefined;
 }
 
 async function checkoutBranch(
@@ -421,6 +412,7 @@ async function checkoutBranch(
   try {
     await repo.fetch(remoteName, branchName);
   } catch (error) {
+    // Not an exception, as expected when user enters bad branch name.
     vscode.window.showErrorMessage(
       `${extensionName}: Error fetching Git branch '${ref}': ${error}`,
     );
