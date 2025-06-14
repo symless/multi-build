@@ -7,7 +7,7 @@ on:
     branches: [master]
 
 jobs:
-  build-test:
+  main:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,8 +25,8 @@ jobs:
       - name: Run lint
         run: npm run lint
 
-      - name: Run tests
-        run: npm test
+      - name: Run tests (headless)
+        run: xvfb-run -a npm test
 
       - name: Package
         run: npm run package
