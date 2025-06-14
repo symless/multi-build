@@ -3,7 +3,7 @@
   "displayName": "Multi-Build",
   "publisher": "symless",
   "description": "Switch all machines to the same Git branch and then builds",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "engines": {
     "vscode": "^1.99.0"
   },
