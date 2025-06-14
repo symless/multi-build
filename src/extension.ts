@@ -50,21 +50,12 @@ export function activate(context: vscode.ExtensionContext) {
   // Register command to show and edit the current room ID
   context.subscriptions.push(
     vscode.commands.registerCommand(showRoomIdCommand, async () => {
-      const config = vscode.workspace.getConfiguration(serverConfigKey);
-      let currentRoomId = config.get<string>("roomId") || "";
-      const newRoomId = await vscode.window.showInputBox({
-        prompt: "View or edit the current Multi-Build room ID",
-        placeHolder: "room-id",
-        value: currentRoomId,
-        ignoreFocusOut: true,
-      });
-      if (newRoomId && newRoomId !== currentRoomId) {
-        await vscode.workspace
-          .getConfiguration()
-          .update(serverConfigKey, { ...config, roomId: newRoomId }, true);
-        vscode.window.showInformationMessage(`${extensionName}: Room ID updated to ${newRoomId}`);
-      } else if (newRoomId === currentRoomId) {
-        vscode.window.showInformationMessage(`${extensionName}: Room ID unchanged.`);
+      const config = await getServerConfig();
+      const roomId = await getRoomId(config.roomId);
+      if (roomId !== config.roomId) {
+        await updateServerConfig({ ...config, roomId });
+      } else {
+        vscode.window.showInformationMessage(`${extensionName}: Room ID unchanged: ${roomId}`);
       }
     }),
   );
@@ -87,12 +78,15 @@ export function deactivate() {
 async function init() {
   console.log(`${logTag} Initializing`);
 
-  const { baseUrl, roomId: existingRoomId } = await getServerConfig();
-  console.log(`${logTag} Server config:`, { baseUrl });
+  const config = await getServerConfig();
+  console.log(`${logTag} Server config:`, config);
 
-  const roomId = await persistRoomId(existingRoomId ?? null);
-
-  await vscode.workspace.getConfiguration().update(serverConfigKey, { roomId, baseUrl }, true);
+  if (!config.roomId) {
+    const roomId = await getRoomId(config.roomId);
+    await updateServerConfig({ ...config, roomId });
+  } else {
+    console.log(`${logTag} Using existing room ID: ${config.roomId}`);
+  }
 
   console.log(`${logTag} Watching for config changes`);
   configWatcher = vscode.workspace.onDidChangeConfiguration(async (event) => {
@@ -111,27 +105,24 @@ async function init() {
   console.log(`${logTag} Initialized`);
 }
 
-async function persistRoomId(existingRoomId: string | null) {
-  if (existingRoomId) {
-    console.log(`${logTag} Using existing room ID: ${existingRoomId}`);
-    return existingRoomId;
-  }
+async function updateServerConfig(newConfig: { baseUrl?: string; roomId?: string }) {
+  await vscode.workspace.getConfiguration().update(serverConfigKey, newConfig, true);
+}
 
+async function getRoomId(existingRoomId: string | null) {
   // Prompt the user for a room ID.
   // Hopefully they don't enter something that is already in use, as 'room in use' UX is a bit
   // unintuitive right now (you'll most likely get an authentication error).
   const custom = await vscode.window.showInputBox({
     prompt:
-      "First time using Multi-Build? " +
-      "Leave this blank to generate a new unique room ID, " +
+      "The room ID must match on all computers. " +
+      "First timers leave this blank to generate a new unique room ID, " +
       "or copy-paste an existing one from another computer.",
-    placeHolder: "room-id",
-    value: "",
     ignoreFocusOut: true,
   });
 
   if (custom) {
-    vscode.window.showInformationMessage(`${extensionName}: Using entered room ID: ${custom}`);
+    vscode.window.showInformationMessage(`${extensionName}: Using new room ID: ${custom}`);
     return custom.trim();
   }
 
@@ -282,7 +273,7 @@ async function pushRepoSettings() {
 async function getServerConfig() {
   const config = vscode.workspace.getConfiguration(serverConfigKey);
   const baseUrl = config.get<string>("baseUrl") || defaultBaseUrl;
-  const roomId = config.get<string>("roomId");
+  const roomId = config.get<string>("roomId") || null;
   return { baseUrl, roomId };
 }
 
