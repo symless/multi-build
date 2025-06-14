@@ -1,12 +1,13 @@
 # Multi-Build
 
-VS Code extension to switch all machines to the same Git branch and build.
+VS Code extension to switch all machines to the same branch, configure, and build.
 
 This extension is easier to use if you [synchronize](https://code.visualstudio.com/docs/configure/settings-sync)
 your `settings.json` file across all of your computers.
 
 > [!TIP]
-> Currently, only Git and CMake are supported, but custom commands are planned for the future.
+> Currently, only Git and CMake are supported _for now_.
+> Please open a feature request issue if you want support for other tools, custom commands, etc.
 
 ![Leeloo Dallas Multi-Build](https://github.com/user-attachments/assets/ae110ac8-959e-4a75-872d-be80bc079b6a)
 
