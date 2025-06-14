@@ -1,5 +1,7 @@
 # Multi-Build
 
+[![CI](https://github.com/symless/multi-build/actions/workflows/ci.yml/badge.svg)](https://github.com/symless/multi-build/actions/workflows/ci.yml)
+
 VS Code extension to switch all machines to the same branch, configure, and build.
 
 This extension is easier to use if you [synchronize](https://code.visualstudio.com/docs/configure/settings-sync)
