@@ -297,6 +297,10 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
 
 async function connectWebSocket() {
   const { baseUrl, roomId } = await getServerConfig();
+  if (!roomId) {
+    // TODO: Handle room ID being removed from config while extension is running.
+    throw new Error("No room ID in config");
+  }
 
   if (activeSocket) {
     console.log(`${logTag} WebSocket already connected, disconnecting`);
