@@ -11,6 +11,14 @@ your `settings.json` file across all of your computers.
 
 ![Leeloo Dallas Multi-Build](https://github.com/user-attachments/assets/ae110ac8-959e-4a75-872d-be80bc079b6a)
 
+## Contributing
+
+Thanks for your interest in contributing!
+
+Please see the [Contributing](https://github.com/symless/multi-build/wiki/Contributing) article on our wiki.
+
+Happy coding.
+
 ## Download & Install
 
 1. Download the [latest release](https://github.com/symless/multi-build/releases)
