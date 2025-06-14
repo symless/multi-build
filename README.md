@@ -62,6 +62,7 @@ Yes, when we get enough requests. Right now you have to manually install the `.v
 
 ### How does it work?
 
-We run a WebSockets server that your computers will connect to securely via a GitHub auth token.
+We run a WebSockets server ([multi-build-server](https://github.com/symless/multi-build-server))
+that your computers will connect to securely via a GitHub auth token.
 When you run the sync command, all computers will receive it along with what repo, remote, and branch to checkout and pull.
 Once checkout is done, the configure and build commands run so that all computers have build the same version.
