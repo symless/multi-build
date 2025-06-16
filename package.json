@@ -25,8 +25,8 @@
         "title": "Multi-Build: Reconnect"
       },
       {
-        "command": "multiBuild.showRoomId",
-        "title": "Multi-Build: Show/Edit Room ID"
+        "command": "multiBuild.configure",
+        "title": "Multi-Build: Configure"
       }
     ],
     "configuration": {

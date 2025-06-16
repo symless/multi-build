@@ -11,7 +11,7 @@ const serverConfigKey = "multiBuild.server";
 const syncDataConfigKey = "multiBuild.syncData";
 const reconnectCommand = `multiBuild.reconnect`;
 const syncCommand = `multiBuild.sync`;
-const showRoomIdCommand = "multiBuild.showRoomId";
+const configureCommand = "multiBuild.configure";
 const defaultBaseUrl = "wss://multi-build-server.symless.workers.dev";
 const keepAliveIntervalMillis = 10000; // 10 seconds
 
@@ -49,7 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to show and edit the current room ID
   context.subscriptions.push(
-    vscode.commands.registerCommand(showRoomIdCommand, async () => {
+    vscode.commands.registerCommand(configureCommand, async () => {
       const config = await getServerConfig();
       const roomId = await showRoomIdPrompt(config.roomId);
       if (roomId !== config.roomId) {
