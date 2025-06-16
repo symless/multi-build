@@ -23,6 +23,14 @@ Happy coding.
 
 ## Download & Install
 
+Launch VS Code Quick Open (Ctrl+P), paste the following command, and press enter.
+```
+ext install Symless.multi-build
+```
+
+[Marketplace homepage](https://marketplace.visualstudio.com/items?itemName=Symless.multi-build)
+
+Or, use the `.vsix` from the releases page:
 1. Download the [latest release](https://github.com/symless/multi-build/releases)
 2. Open VS Code
 3. Go to 'Extensions'
