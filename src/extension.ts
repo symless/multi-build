@@ -318,7 +318,8 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
 
   const checkoutResult = await checkoutBranch(repo, remote, branch);
   if (!checkoutResult) {
-    // Not necessarily an error; maybe the repo doesn't exist in this workspace.
+    // Not an error; if there was an error then an error message should have been shown
+    // to the user already in the checkout function. Exceptions are handled up the stack.
     console.debug(`${logTag} No Git checkout happened, skipping build`);
     return;
   }
@@ -327,12 +328,24 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
     `${extensionName}: Checked out branch '${branch}' from '${repo}/${remote}'`,
   );
 
+  const cmakeFiles = await vscode.workspace.findFiles("**/CMakeLists.txt");
+  if (cmakeFiles.length > 0) {
+    console.debug(`${logTag} Found CMake files`);
+    await runCmakeCommands();
+  } else {
+    // Common and normal use case; may not be a CMake project.
+    // TODO: Perhaps we should ask the user what kind of build system they use and error if we can't run CMake?
+    console.debug(`${logTag} No CMake files found`);
+  }
+}
+
+async function runCmakeCommands() {
   console.log(`${logTag} CMake configure`);
   await vscode.commands.executeCommand("cmake.configure");
 
   // Wait a moment for CMake to finish up (or we get "already running" errors).
   console.log(`${logTag} Waiting for CMake`);
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   console.log(`${logTag} CMake build`);
   await vscode.commands.executeCommand("cmake.build");
