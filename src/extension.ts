@@ -20,6 +20,11 @@ var activeSocket: WebSocket | undefined;
 var keepAlive: NodeJS.Timeout | undefined;
 var connected = false;
 
+interface ServerConfig {
+  baseUrl: string;
+  roomId: string | null;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   init().catch((error) => {
     handleError(error);
@@ -50,15 +55,18 @@ export function activate(context: vscode.ExtensionContext) {
   // Register command to show and edit the current room ID
   context.subscriptions.push(
     vscode.commands.registerCommand(configureCommand, async () => {
-      const config = await getServerConfig();
-      const roomId = await showRoomIdPrompt(config.roomId);
-      if (roomId !== config.roomId) {
-        await updateServerConfig({ ...config, roomId });
-      } else {
-        vscode.window.showInformationMessage(`${extensionName}: Room ID did not change`);
-      }
+      await configure(await getServerConfig());
     }),
   );
+}
+
+async function configure(config: ServerConfig) {
+  const roomId = await showRoomIdPrompt(config.roomId);
+  if (roomId) {
+    await updateServerConfig({ ...config, roomId });
+  } else {
+    vscode.window.showErrorMessage(`${extensionName}: No room ID provided`);
+  }
 }
 
 export function deactivate() {
@@ -82,8 +90,7 @@ async function init() {
   console.log(`${logTag} Server config:`, config);
 
   if (!config.roomId) {
-    const roomId = await showRoomIdPrompt(config.roomId);
-    await updateServerConfig({ ...config, roomId });
+    await configure(config);
   } else {
     console.log(`${logTag} Using existing room ID: ${config.roomId}`);
   }
