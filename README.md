@@ -64,10 +64,6 @@ isn't _too_ much of a chore, but what if you have three, four, or more? Then it 
 
 Multi-Build makes it possible to test a PR on multiple computers with a single command.
 
-### Any plans to go on the marketplace?
-
-Yes, when we get enough requests. Right now you have to manually install the `.vsix` which isn't too hard.
-
 ### How does it work?
 
 We run a WebSockets server ([multi-build-server](https://github.com/symless/multi-build-server))
