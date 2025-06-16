@@ -193,6 +193,7 @@ async function getRepo(currentRepo?: string) {
   const options = {
     placeHolder: "Select a repository",
     canPickMany: false,
+    ignoreFocusOut: true,
   };
 
   return await vscode.window.showQuickPick(repos, options).then((item) => item?.label);
@@ -232,9 +233,32 @@ async function getRemote(repoName: string, currentConfig?: { repo?: string; remo
   const options = {
     placeHolder: "Select a remote",
     canPickMany: false,
+    ignoreFocusOut: true,
   };
 
   return await vscode.window.showQuickPick(remotes, options).then((item) => item?.label);
+}
+
+async function getBranch(repoName: string, config?: { branch?: string }) {
+  const git = getGitAPI();
+  const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
+  if (!repo) {
+    throw new Error(`Repository '${repoName}' not found`);
+  }
+
+  // The head name will be undefined if, for example, we're on a detached head.
+  const branchName = repo.state.HEAD?.name || config?.branch || "master";
+
+  // Always ask the branch name, as this is what changes most often.
+  // Copy pasting this from the PR isn't a big deal, and it's not often one we've used before.
+  const branch = await vscode.window.showInputBox({
+    prompt: "Enter the branch name",
+    placeHolder: "hello-branch",
+    value: branchName,
+    ignoreFocusOut: true,
+  });
+
+  return branch;
 }
 
 async function pushRepoSettings() {
@@ -252,13 +276,7 @@ async function pushRepoSettings() {
     return;
   }
 
-  // Always ask the branch name, as this is what changes most often.
-  // Copy pasting this from the PR isn't a big deal, and it's not often one we've used before.
-  const branch = await vscode.window.showInputBox({
-    prompt: "Enter the branch name",
-    placeHolder: "hello-branch",
-    value: config?.branch || "master",
-  });
+  const branch = await getBranch(repo, config);
   if (!branch) {
     vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no branch specified`);
     return;
