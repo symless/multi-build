@@ -170,9 +170,18 @@ function getGitAPI() {
   return git;
 }
 
+function getRepo(repoName: string) {
+  const git = getGitAPI();
+  const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
+  if (!repo) {
+    throw new Error(`Repository '${repoName}' not found`);
+  }
+  return repo;
+}
+
 // Always show the list of remotes but pre-select the one that was used last.
 // We could save the last used repo in the workspace config, but for now we'll ask.
-async function getRepo(currentRepo?: string) {
+async function showRepoInput(currentRepo?: string) {
   const git = getGitAPI();
   const repos = git.repositories.map((repo) => ({
     label: path.basename(repo.rootUri.fsPath),
@@ -193,6 +202,7 @@ async function getRepo(currentRepo?: string) {
   const options = {
     placeHolder: "Select a repository",
     canPickMany: false,
+    ignoreFocusOut: true,
   };
 
   return await vscode.window.showQuickPick(repos, options).then((item) => item?.label);
@@ -202,19 +212,17 @@ async function getRepo(currentRepo?: string) {
 // otherwise show all remotes since it's either a new repo or the remote wasn't chosen before.
 // Don't show all remotes every time, as this makes it a bit tedious; usually we only want to set
 // the remote once and use it for all future syncs. This chan be changed in `settings.json`.
-async function getRemote(repoName: string, currentConfig?: { repo?: string; remote?: string }) {
+async function showRemoteInput(
+  repoName: string,
+  currentConfig?: { repo?: string; remote?: string },
+) {
   const { repo: currentRepo, remote: currentRemote } = currentConfig || {};
   if (currentRepo === repoName && currentRemote) {
     console.log(`${logTag} Repo not changed, using existing remote: ${currentRemote}`);
     return currentRemote;
   }
 
-  const git = getGitAPI();
-  const repo = git.repositories.find((r) => path.basename(r.rootUri.fsPath) === repoName);
-  if (!repo) {
-    throw new Error(`Repository '${repoName}' not found`);
-  }
-
+  const repo = getRepo(repoName);
   const remotes = repo.state.remotes.map((remote) => ({
     label: remote.name,
     description: remote.fetchUrl,
@@ -232,33 +240,46 @@ async function getRemote(repoName: string, currentConfig?: { repo?: string; remo
   const options = {
     placeHolder: "Select a remote",
     canPickMany: false,
+    ignoreFocusOut: true,
   };
 
   return await vscode.window.showQuickPick(remotes, options).then((item) => item?.label);
 }
 
-async function pushRepoSettings() {
-  const config = getSyncData();
+async function showBranchInput(repoName: string, config?: { branch?: string }) {
+  const repo = getRepo(repoName);
 
-  const repo = await getRepo(config.repo);
-  if (!repo) {
-    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no repo specified`);
-    return;
-  }
-
-  const remote = await getRemote(repo, config);
-  if (!remote) {
-    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no remote specified`);
-    return;
-  }
+  // The head name will be undefined if, for example, we're on a detached head.
+  const branchName = repo.state.HEAD?.name || config?.branch || "master";
 
   // Always ask the branch name, as this is what changes most often.
   // Copy pasting this from the PR isn't a big deal, and it's not often one we've used before.
   const branch = await vscode.window.showInputBox({
     prompt: "Enter the branch name",
     placeHolder: "hello-branch",
-    value: config?.branch || "master",
+    value: branchName,
+    ignoreFocusOut: true,
   });
+
+  return branch;
+}
+
+async function pushRepoSettings() {
+  const config = getSyncData();
+
+  const repo = await showRepoInput(config.repo);
+  if (!repo) {
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no repo specified`);
+    return;
+  }
+
+  const remote = await showRemoteInput(repo, config);
+  if (!remote) {
+    vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no remote specified`);
+    return;
+  }
+
+  const branch = await showBranchInput(repo, config);
   if (!branch) {
     vscode.window.showErrorMessage(`${extensionName}: Cannot sync, no branch specified`);
     return;
