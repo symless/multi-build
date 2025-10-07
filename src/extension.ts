@@ -356,7 +356,7 @@ async function handleSyncData(data: { repo: string; remote: string; branch: stri
     `${extensionName}: Checked out branch '${branch}' from '${repo}/${remote}'`,
   );
 
-  const cmakeFiles = await vscode.workspace.findFiles("**/CMakeLists.txt");
+  const cmakeFiles = await vscode.workspace.findFiles("CMakeLists.txt");
   if (cmakeFiles.length > 0) {
     console.debug(`${logTag} Found CMake files`);
     await runCmakeCommands();
